@@ -7,7 +7,7 @@ use rand::rngs::OsRng;
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
 
 mod commitment;
-use commitment::PublicParameters;
+use commitment::{PublicParameters, PointProof};
 
 mod dna;
 use dna::{RsIdPoly, RsIdHash};
@@ -46,8 +46,8 @@ enum Cli {
         #[arg(short, long, default_value = "pp.bin")]
         pp: PathBuf,
 
-        hash: PathBuf,
-        #[arg(short, long)]
+        index: usize,
+        hash: String,
         proof: String,
     },
 }
@@ -97,11 +97,30 @@ fn prove(
         RsIdPoly::<FF>::from_file(vcf_file)
     };
 
-    let proof = RsIdHash::<Bls12_381>::prove(&pp, &vcf, index).map(|_| ());
+    let proof = RsIdHash::<Bls12_381>::prove(&pp, &vcf, index).unwrap();
+
+    let mut output = Vec::new();
+    proof.serialize_compressed(&mut output)
+        .map_err(|_| "Serialization error")?;
+    println!("{}", hex::encode(&output));
+
     Ok(())
 }
 
-fn verify(pp: PathBuf, hash: PathBuf, proof: String) -> Result<(), &'static str> {
+fn verify(pp_path: PathBuf, hash: String, proof: String, index: usize) -> Result<(), &'static str> {
+    let mut pp_file = std::fs::File::open(pp_path).map_err(|_| "Error opening pp file")?;
+    let pp = PublicParameters::<Bls12_381>::deserialize_compressed(&mut pp_file)
+        .map_err(|_| "Deserialization error")?;
+
+    let hash = hex::decode(hash).map_err(|_| "Error decoding hash")?;
+    let hash = RsIdHash::<Bls12_381>::deserialize_compressed(&mut hash.as_slice())
+        .map_err(|_| "Error deserializing hash")?;
+
+    let proof = hex::decode(proof).map_err(|_| "Error decoding proof")?;
+    let proof = PointProof::<Bls12_381>::deserialize_compressed(&mut proof.as_slice())
+        .map_err(|_| "Error deserializing proof")?;
+
+    proof.verify(&pp, &hash.into(), index, FF::from(1)).map_err(|_| "Verification error")?;
     Ok(())
 }
 
@@ -118,6 +137,6 @@ fn main() -> Result<(), &'static str> {
             chr,
             index,
         } => prove(pp, vcf, chr, index),
-        Cli::Verify { hash, proof, pp } => verify(pp, hash, proof),
+        Cli::Verify { hash, proof, pp , index} => verify(pp, hash, proof, index),
     }
 }

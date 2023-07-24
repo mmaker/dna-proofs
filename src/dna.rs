@@ -2,6 +2,7 @@ use ark_ec::pairing::Pairing;
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize, Read};
 use crate::commitment::{Commitment, PointProof, PublicParameters};
 use std::io::{BufReader, BufRead};
+use std::borrow::Borrow;
 
 
 fn base_to_int(base: &[u8]) -> u8 {
@@ -94,7 +95,6 @@ impl<F: From<u8>> RsIdPoly<F> {
         let reader = BufReader::new(vcf);
         let mut records: (Vec<usize>, Vec<F>) = Default::default();
 
-        let mut max = 0;
 
         for line in reader.lines() {
             let line = line.unwrap();
@@ -109,18 +109,17 @@ impl<F: From<u8>> RsIdPoly<F> {
             }
             let rsid = cells[2][2..].parse::<usize>().unwrap();
             let alternative = base_to_int(cells[4].as_bytes());
-            if rsid > 1 << 18 {
-                if rsid > max {
-                    max = rsid;
-                }
-                continue;
 
-            }
-
-            records.0.push(rsid);
+            records.0.push(rsid / 64);
             records.1.push(alternative.into());
         }
 
         Self(records)
+    }
+}
+
+impl<E: Pairing, B: Borrow<RsIdHash<E>>> From<B> for Commitment<E> {
+    fn from(value: B) -> Self {
+        value.borrow().0
     }
 }

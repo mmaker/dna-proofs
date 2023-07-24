@@ -5,6 +5,7 @@ use ark_ec::{AffineRepr, CurveGroup, VariableBaseMSM};
 use ark_ff::Field;
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
 use ark_std::UniformRand;
+use log::error;
 use rand::{CryptoRng, RngCore};
 use rayon::iter::IndexedParallelIterator;
 use rayon::iter::IntoParallelRefIterator;
@@ -93,6 +94,7 @@ impl<E: Pairing> PublicParameters<E> {
 #[derive(Copy, Clone, PartialEq, Eq, Debug, CanonicalSerialize, CanonicalDeserialize)]
 pub struct Commitment<E: Pairing>(E::G1Affine);
 
+#[derive(CanonicalDeserialize, CanonicalSerialize)]
 pub struct PointProof<E: Pairing>(E::G1Affine, E::G1Affine);
 
 impl<E: Pairing> Commitment<E> {
@@ -132,6 +134,7 @@ impl<E: Pairing> PointProof<E> {
         index: usize,
     ) -> Result<Self, ()> {
         if index >= polynomial.len() {
+            error!("Index out of bounds: {} requested, polynomial size {}", index, polynomial.len());
             Err(())
         } else {
             let lhs = E::G1::msm_unchecked(&pp.powers_of_g[..index], &polynomial[..index]);
@@ -145,17 +148,16 @@ impl<E: Pairing> PointProof<E> {
         polynomial: &(impl Deref<Target=[usize]>, impl Deref<Target =[E::ScalarField]>),
         index: usize,
     ) -> Result<Self, ()> {
-        if index >= polynomial.0.len() || polynomial.0.len() != polynomial.1.len() {
+        if polynomial.0.len() != polynomial.1.len() {
             Err(())
         } else {
-            let mut index = 0;
-            (0 .. polynomial.0.len()).for_each(|i| if polynomial.0[i] < index { index = polynomial.0[i] });
+            let i = (0.. polynomial.0.len()).take_while(|&j| polynomial.0[j] < index).last().unwrap_or(0);
 
-            let lhs_bases = &polynomial.0[.. index].iter().map(|i| pp.powers_of_g[*i]).collect::<Vec<_>>();
-            let lhs_scalars = &polynomial.1[.. index];
+            let lhs_bases = &polynomial.0[.. i].iter().map(|i| pp.powers_of_g[*i]).collect::<Vec<_>>();
+            let lhs_scalars = &polynomial.1[.. i];
 
-            let rhs_bases = &polynomial.0[index .. ].iter().map(|i| pp.powers_of_g[*i]).collect::<Vec<_>>();
-            let rhs_scalars = &polynomial.1[index ..];
+            let rhs_bases = &polynomial.0[i .. ].iter().map(|i| pp.powers_of_g[*i]).collect::<Vec<_>>();
+            let rhs_scalars = &polynomial.1[i ..];
 
             let lhs = E::G1::msm_unchecked(lhs_bases, lhs_scalars);
             let rhs = E::G1::msm_unchecked(rhs_bases, rhs_scalars);
@@ -164,13 +166,13 @@ impl<E: Pairing> PointProof<E> {
     }
 
     pub fn verify(
+        &self,
         pp: &PublicParameters<E>,
         commitment: &Commitment<E>,
         index: usize,
         value: E::ScalarField,
-        proof: &PointProof<E>,
     ) -> Result<(), ()> {
-        let expected = *pp.powers_of_g.get(index).ok_or(())? * value + proof.0 + proof.1;
+        let expected = *pp.powers_of_g.get(index).ok_or(())? * value + self.0 + self.1;
         if commitment.0 == expected.into() {
             Ok(())
         } else {
