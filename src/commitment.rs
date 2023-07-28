@@ -66,14 +66,22 @@ impl<E: Pairing> PublicParameters<E> {
         }
     }
 
+    #[allow(unused)]
     pub fn commit(&self, polynomial: &[E::ScalarField]) -> Commitment<E> {
         Commitment::new(self, polynomial)
     }
 
-    pub fn commit_sparse(&self, polynomial: &(impl Deref<Target = [usize]>, impl Deref<Target = [E::ScalarField]>)) -> Commitment<E> {
+    pub fn commit_sparse(
+        &self,
+        polynomial: &(
+            impl Deref<Target = [usize]>,
+            impl Deref<Target = [E::ScalarField]>,
+        ),
+    ) -> Commitment<E> {
         Commitment::new_sparse(self, polynomial)
     }
 
+    #[allow(unused)]
     pub fn prove_point(
         &self,
         polynomial: &[E::ScalarField],
@@ -82,9 +90,13 @@ impl<E: Pairing> PublicParameters<E> {
         PointProof::new(self, polynomial, index)
     }
 
+    #[allow(unused)]
     pub fn prove_point_sparse(
         &self,
-        polynomial: (impl Deref<Target = [usize]>, impl Deref<Target = [E::ScalarField]>),
+        polynomial: (
+            impl Deref<Target = [usize]>,
+            impl Deref<Target = [E::ScalarField]>,
+        ),
         index: usize,
     ) -> Result<PointProof<E>, ()> {
         PointProof::new_sparse(self, &polynomial, index)
@@ -103,8 +115,15 @@ impl<E: Pairing> Commitment<E> {
         Self(commitment.into())
     }
 
-    pub fn new_sparse(pp: &PublicParameters<E>, polynomial: &(impl Deref<Target = [usize]>, impl Deref<Target = [E::ScalarField]>)) -> Self {
-        let basis = polynomial.0
+    pub fn new_sparse(
+        pp: &PublicParameters<E>,
+        polynomial: &(
+            impl Deref<Target = [usize]>,
+            impl Deref<Target = [E::ScalarField]>,
+        ),
+    ) -> Self {
+        let basis = polynomial
+            .0
             .iter()
             .map(|i| pp.powers_of_g[*i])
             .collect::<Vec<_>>();
@@ -134,7 +153,11 @@ impl<E: Pairing> PointProof<E> {
         index: usize,
     ) -> Result<Self, ()> {
         if index >= polynomial.len() {
-            error!("Index out of bounds: {} requested, polynomial size {}", index, polynomial.len());
+            error!(
+                "Index out of bounds: {} requested, polynomial size {}",
+                index,
+                polynomial.len()
+            );
             Err(())
         } else {
             let lhs = E::G1::msm_unchecked(&pp.powers_of_g[..index], &polynomial[..index]);
@@ -145,22 +168,32 @@ impl<E: Pairing> PointProof<E> {
 
     pub fn new_sparse(
         pp: &PublicParameters<E>,
-        polynomial: &(impl Deref<Target=[usize]>, impl Deref<Target =[E::ScalarField]>),
+        polynomial: &(
+            impl Deref<Target = [usize]>,
+            impl Deref<Target = [E::ScalarField]>,
+        ),
         index: usize,
     ) -> Result<Self, ()> {
         if polynomial.0.len() != polynomial.1.len() {
             Err(())
         } else {
-            let i = (0.. polynomial.0.len()).take_while(|&j| polynomial.0[j] < index).last().unwrap_or(0);
+            let mut lhs_bases = Vec::new();
+            let mut lhs_scalars = Vec::new();
+            let mut rhs_bases = Vec::new();
+            let mut rhs_scalars = Vec::new();
 
-            let lhs_bases = &polynomial.0[.. i].iter().map(|i| pp.powers_of_g[*i]).collect::<Vec<_>>();
-            let lhs_scalars = &polynomial.1[.. i];
+            for (&i, &x) in polynomial.0.deref().iter().zip(polynomial.1.deref()) {
+                if i < index {
+                    lhs_scalars.push(x);
+                    lhs_bases.push(pp.powers_of_g[i])
+                } else if i > index {
+                    rhs_scalars.push(x);
+                    rhs_bases.push(pp.powers_of_g[i])
+                }
+            }
 
-            let rhs_bases = &polynomial.0[i .. ].iter().map(|i| pp.powers_of_g[*i]).collect::<Vec<_>>();
-            let rhs_scalars = &polynomial.1[i ..];
-
-            let lhs = E::G1::msm_unchecked(lhs_bases, lhs_scalars);
-            let rhs = E::G1::msm_unchecked(rhs_bases, rhs_scalars);
+            let lhs = E::G1::msm_unchecked(&lhs_bases, &lhs_scalars);
+            let rhs = E::G1::msm_unchecked(&rhs_bases, &rhs_scalars);
             Ok(Self(lhs.into(), rhs.into()))
         }
     }
@@ -173,7 +206,7 @@ impl<E: Pairing> PointProof<E> {
         value: E::ScalarField,
     ) -> Result<(), ()> {
         let expected = *pp.powers_of_g.get(index).ok_or(())? * value + self.0 + self.1;
-        if commitment.0 == expected.into() {
+        if commitment.0 == expected.into_affine() {
             Ok(())
         } else {
             Err(())
@@ -181,13 +214,15 @@ impl<E: Pairing> PointProof<E> {
     }
 }
 
-
 #[test]
 fn test_crs() {
     type E = ark_bls12_381::Bls12_381;
 
     let pp = PublicParameters::<E>::new(&mut rand::thread_rng(), 13);
-    for i in 1..pp.powers_of_g.len()-1 {
-        assert_eq!(E::pairing(pp.powers_of_g[i],  pp.powers_of_g2[1]), E::pairing(pp.powers_of_g[i+1], pp.powers_of_g2[0]));
+    for i in 1..pp.powers_of_g.len() - 1 {
+        assert_eq!(
+            E::pairing(pp.powers_of_g[i], pp.powers_of_g2[1]),
+            E::pairing(pp.powers_of_g[i + 1], pp.powers_of_g2[0])
+        );
     }
 }

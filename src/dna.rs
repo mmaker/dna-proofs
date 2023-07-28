@@ -1,11 +1,12 @@
+use crate::commitment::{Commitment, PointProof, PublicParameters};
 use ark_ec::pairing::Pairing;
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize, Read};
-use crate::commitment::{Commitment, PointProof, PublicParameters};
-use std::io::{BufReader, BufRead};
 use std::borrow::Borrow;
+use std::collections::HashMap;
+use std::fmt::Debug;
+use std::io::{BufRead, BufReader};
 
-
-fn base_to_int(base: &[u8]) -> u8 {
+pub(crate) fn base_to_int(base: &[u8]) -> u8 {
     match base {
         b"A" => 1,
         b"C" => 2,
@@ -15,10 +16,10 @@ fn base_to_int(base: &[u8]) -> u8 {
     }
 }
 
+#[allow(unused)]
 fn chromosome_to_int(chr: &[u8]) -> usize {
     str::parse(std::str::from_utf8(chr).unwrap()).unwrap()
 }
-
 
 #[derive(PartialEq, Eq, Debug, CanonicalSerialize, CanonicalDeserialize)]
 pub struct DnaHash<E: Pairing>([Commitment<E>; 23]);
@@ -27,9 +28,12 @@ pub struct DnaHash<E: Pairing>([Commitment<E>; 23]);
 pub struct RsIdHash<E: Pairing>(Commitment<E>);
 
 pub struct DnaPoly<F: From<u8>>([(Vec<usize>, Vec<F>); 23]);
+
+#[derive(Debug)]
 pub struct RsIdPoly<F: From<u8>>((Vec<usize>, Vec<F>));
 
 impl<F: From<u8>> DnaPoly<F> {
+    #[allow(unused)]
     pub fn from_file(vcf: impl Read) -> Self {
         let reader = BufReader::new(vcf);
 
@@ -48,16 +52,16 @@ impl<F: From<u8>> DnaPoly<F> {
             let position = cells[1].parse::<usize>().unwrap();
             let alternative = base_to_int(cells[4].as_bytes());
 
-            records[chromosome].0.push(position / 1 << 20);
+            records[chromosome].0.push(position);
             records[chromosome].1.push(alternative.into())
         }
-
+        records.sort_by(|(i, a), (j, b)| i.partial_cmp(j).unwrap());
         Self(records)
     }
 }
 
-
 impl<E: Pairing> DnaHash<E> {
+    #[allow(unused)]
     pub fn new(pp: &PublicParameters<E>, vcf: &DnaPoly<E::ScalarField>) -> Self {
         let mut commitments = [Commitment::default(); 23];
         for i in 0..23 {
@@ -66,6 +70,7 @@ impl<E: Pairing> DnaHash<E> {
         Self(commitments)
     }
 
+    #[allow(unused)]
     pub fn prove(
         pp: &PublicParameters<E>,
         vcf: &DnaPoly<E::ScalarField>,
@@ -89,12 +94,10 @@ impl<E: Pairing> RsIdHash<E> {
     }
 }
 
-
 impl<F: From<u8>> RsIdPoly<F> {
-    pub fn from_file(vcf: impl Read) -> Self {
+    pub fn from_file(vcf: impl Read, filter: HashMap<usize, usize>) -> Self {
         let reader = BufReader::new(vcf);
         let mut records: (Vec<usize>, Vec<F>) = Default::default();
-
 
         for line in reader.lines() {
             let line = line.unwrap();
@@ -110,8 +113,13 @@ impl<F: From<u8>> RsIdPoly<F> {
             let rsid = cells[2][2..].parse::<usize>().unwrap();
             let alternative = base_to_int(cells[4].as_bytes());
 
-            records.0.push(rsid / 64);
-            records.1.push(alternative.into());
+            match filter.get(&rsid) {
+                Some(&index) => {
+                    records.0.push(index);
+                    records.1.push(alternative.into());
+                }
+                None => {}
+            }
         }
 
         Self(records)
